@@ -1,0 +1,74 @@
+# Filename: openrazer-kmod.spec.in
+#
+# This file is turned into openrazer-kmod.spec by the parent openrazer spec,
+# packed into an SRPM and handed over to akmods. It is never built by hand.
+
+%if 0%{?fedora}
+%global buildforkernels akmod
+%endif
+
+%global debug_package %{nil}
+%global kmod_name openrazer
+
+Name:          openrazer-kmod
+Version:       @OPENRAZER_VERSION@
+Release:       @RELEASE@
+Summary:       OpenRazer kernel modules
+
+License:       GPL-2.0-or-later
+URL:           https://github.com/openrazer/openrazer
+
+Source0:       openrazer-kmod-%{version}.tar.gz
+
+# get the needed BuildRequires (in parts depending on what we build for)
+%global AkmodsBuildRequires %{_bindir}/kmodtool
+BuildRequires: %{AkmodsBuildRequires}
+BuildRequires: gcc, make
+
+%{!?kernels:BuildRequires: buildsys-build-rpmfusion-kerneldevpkgs-%{?buildforkernels:%{buildforkernels}}%{!?buildforkernels:current}-%{_target_cpu} }
+
+# kmodtool does its magic here
+%{expand:%(kmodtool --target %{_target_cpu} --repo rpmfusion --kmodname %{kmod_name} %{?buildforkernels:--%{buildforkernels}} %{?kernels:--for-kernels "%{?kernels}"} 2>/dev/null) }
+
+%description
+The OpenRazer %{version} kernel modules for kernel %{kversion}.
+OpenRazer provides drivers for Razer keyboards, mice, Kraken headsets and
+accessories.
+
+%prep
+# error out if there was something wrong with kmodtool
+%{?kmodtool_check}
+# print kmodtool output for debugging purposes:
+kmodtool --target %{_target_cpu} --repo rpmfusion --kmodname %{kmod_name} %{?buildforkernels:--%{buildforkernels}} %{?kernels:--for-kernels "%{?kernels}"} 2>/dev/null
+
+%setup -q -c -T -a 0
+
+for kernel_version in %{?kernel_versions} ; do
+    kbuild=$(printf '%s' "$kernel_version" | sed 's/___.*//')
+    cp -a openrazer-kmod-%{version} _kmod_build_"$kbuild"
+done
+
+%build
+# Build with the upstream tree untouched: the top-level Makefile's 'driver'
+# target (which in turn uses driver/Makefile) does the out-of-tree kbuild.
+for kernel_version in %{?kernel_versions}; do
+    kbuild=$(printf '%s' "$kernel_version" | sed 's/___.*//')
+    kdir=$(printf '%s' "$kernel_version" | sed 's/.*___//')
+    make %{?_smp_mflags} -C "$PWD/_kmod_build_$kbuild" \
+        driver \
+        KERNELDIR="$kdir" \
+        DRIVERDIR="$PWD/_kmod_build_$kbuild/driver"
+done
+
+%install
+for kernel_version in %{?kernel_versions}; do
+    kbuild=$(printf '%s' "$kernel_version" | sed 's/___.*//')
+    mkdir -p %{buildroot}%{kmodinstdir_prefix}"$kbuild"%{kmodinstdir_postfix}
+    install -D -m 0644 _kmod_build_"$kbuild"/driver/*.ko \
+        %{buildroot}%{kmodinstdir_prefix}"$kbuild"%{kmodinstdir_postfix}
+done
+
+%changelog
+* Thu Nov 05 2026 Sunny Yang <yxh9956@gmail.com> - @OPENRAZER_VERSION@-@RELEASE@
+- Follow the coreFreq akmod pattern: ship the upstream tree and let its own
+  Makefile build the driver
